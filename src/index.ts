@@ -14,6 +14,14 @@ enum Direction {
 type Hasher = (v: Buffer) => Buffer
 const hash: Hasher = sha256
 
+type Proof = Buffer[]
+interface CompactProof {
+  // Bitmask tells us which parts of proof should be filled in
+  // from the default values (hashes of empty subtrees)
+  bitmask: Buffer
+  proof: Proof
+}
+
 /**
  * Sparse Merkle tree
  */
@@ -24,8 +32,9 @@ export class SMT {
 
   constructor() {
     this._db = new DB()
-    this._defaultValues = new Array(DEPTH)
+    this._defaultValues = new Array(DEPTH + 1)
     let h = EMPTY_VALUE
+    this._defaultValues[256] = h
     for (let i = DEPTH - 1; i >= 0; i--) {
       const newH = hash(Buffer.concat([h, h]))
       this._db.set(newH, Buffer.concat([h, h]))
@@ -33,22 +42,6 @@ export class SMT {
       h = newH
     }
     this._root = h
-  }
-
-  static verifyProof(proof: Buffer[], root: Buffer, key: Buffer, value: Buffer): boolean {
-    assert(proof.length === DEPTH, 'Incorrect proof length')
-
-    let v = hash(value)
-    for (let i = DEPTH - 1; i >= 0; i--) {
-      const direction = getPathDirection(key, i)
-      if (direction === Direction.Left) {
-        v = hash(Buffer.concat([v, proof[i]]))
-      } else {
-        v = hash(Buffer.concat([proof[i], v]))
-      }
-    }
-
-    return v.equals(root)
   }
 
   get root(): Buffer {
@@ -114,7 +107,7 @@ export class SMT {
     return v.equals(EMPTY_VALUE) ? undefined : this._db.get(v)
   }
 
-  prove(key: Buffer): Buffer[] {
+  prove(key: Buffer): Proof {
     let v = this._root
     const siblings = []
     for (let i = 0; i < DEPTH; i++) {
@@ -131,10 +124,60 @@ export class SMT {
     }
     return siblings
   }
+
+  verifyProof(proof: Proof, root: Buffer, key: Buffer, value: Buffer): boolean {
+    assert(proof.length === DEPTH, 'Incorrect proof length')
+
+    let v = hash(value)
+    for (let i = DEPTH - 1; i >= 0; i--) {
+      const direction = getPathDirection(key, i)
+      if (direction === Direction.Left) {
+        v = hash(Buffer.concat([v, proof[i]]))
+      } else {
+        v = hash(Buffer.concat([proof[i], v]))
+      }
+    }
+
+    return v.equals(root)
+  }
+
+  verifyCompactProof(cproof: CompactProof, root: Buffer, key: Buffer, value: Buffer): boolean {
+    const proof = this.decompressProof(cproof)
+    return this.verifyProof(proof, root, key, value)
+  }
+
+  compressProof(proof: Proof): CompactProof {
+    const bits = Buffer.alloc(KEY_SIZE)
+    const newProof = []
+    for (let i = 0; i < DEPTH; i++) {
+      if (proof[i].equals(this._defaultValues[i + 1])) {
+        bits[Math.floor(i / 8)] ^= 1 << (7 - (i % 8))
+      } else {
+        newProof.push(proof[i])
+      }
+    }
+    return { bitmask: bits, proof: newProof }
+  }
+
+  decompressProof(cproof: CompactProof): Proof {
+    const proof = []
+    for (let i = 0; i < DEPTH; i++) {
+      if (cproof.bitmask[Math.floor(i / 8)] & (1 << (7 - (i % 8)))) {
+        proof.push(this._defaultValues[i + 1])
+      } else {
+        const v = cproof.proof.pop()
+        if (v === undefined) {
+          throw new Error('Invalid compact proof')
+        }
+        proof.push(v)
+      }
+    }
+    return proof
+  }
 }
 
 function getPathDirection(path: Buffer, i: number): Direction {
   const byte = path[Math.floor(i / 8)]
-  const bit = byte & (2 ** (7 - (i % 8)))
+  const bit = byte & (1 << (7 - (i % 8)))
   return bit === 0 ? Direction.Left : Direction.Right
 }
