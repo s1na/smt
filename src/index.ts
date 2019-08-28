@@ -1,5 +1,6 @@
 import * as assert from 'assert'
 import { sha256, zeros } from 'ethereumjs-util'
+import { DB } from './db'
 
 const KEY_SIZE = 32
 const DEPTH = KEY_SIZE * 8
@@ -14,17 +15,17 @@ enum Direction {
  * Sparse Merkle tree
  */
 export class SMT {
-  _db: Map<string, Buffer>
+  _db: DB
   _root: Buffer
   _defaultValues: Buffer[]
 
   constructor() {
-    this._db = new Map()
+    this._db = new DB()
     this._defaultValues = new Array(DEPTH)
     let h = EMPTY_VALUE
     for (let i = DEPTH - 1; i >= 0; i--) {
       const newH = sha256(Buffer.concat([h, h]))
-      this._db.set(newH.toString('hex'), Buffer.concat([h, h]))
+      this._db.set(newH, Buffer.concat([h, h]))
       this._defaultValues[i] = newH
       h = newH
     }
@@ -42,7 +43,7 @@ export class SMT {
     const siblings: [Direction, Buffer][] = []
     for (let i = 0; i < DEPTH; i++) {
       const direction = this._getPathDirection(key, i)
-      const res = this._db.get(v.toString('hex'))
+      const res = this._db.get(v)
       if (!res) throw new Error('Value not found in db')
       if (direction === Direction.Left) {
         v = res.slice(0, 32)
@@ -55,7 +56,7 @@ export class SMT {
 
     if (value) {
       v = sha256(value)
-      this._db.set(v.toString('hex'), value)
+      this._db.set(v, value)
     } else {
       v = EMPTY_VALUE
     }
@@ -65,10 +66,10 @@ export class SMT {
       let h
       if (direction === Direction.Left) {
         h = sha256(Buffer.concat([v, sibling]))
-        this._db.set(h.toString('hex'), Buffer.concat([v, sibling]))
+        this._db.set(h, Buffer.concat([v, sibling]))
       } else {
         h = sha256(Buffer.concat([sibling, v]))
-        this._db.set(h.toString('hex'), Buffer.concat([sibling, v]))
+        this._db.set(h, Buffer.concat([sibling, v]))
       }
       v = h
     }
@@ -82,7 +83,7 @@ export class SMT {
     let v = this._root
     for (let i = 0; i < DEPTH; i++) {
       const direction = this._getPathDirection(key, i)
-      const res = this._db.get(v.toString('hex'))
+      const res = this._db.get(v)
       if (!res) throw new Error('Value not found in db')
       if (direction === Direction.Left) {
         v = res.slice(0, 32)
@@ -91,7 +92,7 @@ export class SMT {
       }
     }
 
-    return v.equals(EMPTY_VALUE) ? undefined : this._db.get(v.toString('hex'))
+    return v.equals(EMPTY_VALUE) ? undefined : this._db.get(v)
   }
 
   _getPathDirection(path: Buffer, i: number): Direction {
