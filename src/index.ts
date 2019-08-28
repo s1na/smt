@@ -12,7 +12,6 @@ enum Direction {
 }
 
 type Hasher = (v: Buffer) => Buffer
-const hash: Hasher = sha256
 
 type Proof = Buffer[]
 interface CompactProof {
@@ -29,14 +28,16 @@ export class SMT {
   _db: DB
   _root: Buffer
   _defaultValues: Buffer[]
+  _hasher: Hasher
 
-  constructor() {
+  constructor(hasher: Hasher = sha256) {
+    this._hasher = hasher
     this._db = new DB()
     this._defaultValues = new Array(DEPTH + 1)
     let h = EMPTY_VALUE
     this._defaultValues[256] = h
     for (let i = DEPTH - 1; i >= 0; i--) {
-      const newH = hash(Buffer.concat([h, h]))
+      const newH = this.hash(Buffer.concat([h, h]))
       this._db.set(newH, Buffer.concat([h, h]))
       this._defaultValues[i] = newH
       h = newH
@@ -67,7 +68,7 @@ export class SMT {
     }
 
     if (value) {
-      v = hash(value)
+      v = this.hash(value)
       this._db.set(v, value)
     } else {
       v = EMPTY_VALUE
@@ -77,10 +78,10 @@ export class SMT {
       const [direction, sibling] = siblings.pop()!
       let h
       if (direction === Direction.Left) {
-        h = hash(Buffer.concat([v, sibling]))
+        h = this.hash(Buffer.concat([v, sibling]))
         this._db.set(h, Buffer.concat([v, sibling]))
       } else {
-        h = hash(Buffer.concat([sibling, v]))
+        h = this.hash(Buffer.concat([sibling, v]))
         this._db.set(h, Buffer.concat([sibling, v]))
       }
       v = h
@@ -128,13 +129,13 @@ export class SMT {
   verifyProof(proof: Proof, root: Buffer, key: Buffer, value: Buffer): boolean {
     assert(proof.length === DEPTH, 'Incorrect proof length')
 
-    let v = hash(value)
+    let v = this.hash(value)
     for (let i = DEPTH - 1; i >= 0; i--) {
       const direction = getPathDirection(key, i)
       if (direction === Direction.Left) {
-        v = hash(Buffer.concat([v, proof[i]]))
+        v = this.hash(Buffer.concat([v, proof[i]]))
       } else {
-        v = hash(Buffer.concat([proof[i], v]))
+        v = this.hash(Buffer.concat([proof[i], v]))
       }
     }
 
@@ -173,6 +174,10 @@ export class SMT {
       }
     }
     return proof
+  }
+
+  hash(value: Buffer): Buffer {
+    return this._hasher(value)
   }
 }
 
