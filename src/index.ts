@@ -8,8 +8,11 @@ const EMPTY_VALUE = zeros(KEY_SIZE)
 
 enum Direction {
   Left = 0,
-  Right = 1
+  Right = 1,
 }
+
+type Hasher = (v: Buffer) => Buffer
+const hash: Hasher = sha256
 
 /**
  * Sparse Merkle tree
@@ -24,12 +27,28 @@ export class SMT {
     this._defaultValues = new Array(DEPTH)
     let h = EMPTY_VALUE
     for (let i = DEPTH - 1; i >= 0; i--) {
-      const newH = sha256(Buffer.concat([h, h]))
+      const newH = hash(Buffer.concat([h, h]))
       this._db.set(newH, Buffer.concat([h, h]))
       this._defaultValues[i] = newH
       h = newH
     }
     this._root = h
+  }
+
+  static verifyProof(proof: Buffer[], root: Buffer, key: Buffer, value: Buffer): boolean {
+    assert(proof.length === DEPTH, 'Incorrect proof length')
+
+    let v = hash(value)
+    for (let i = DEPTH - 1; i >= 0; i--) {
+      const direction = getPathDirection(key, i)
+      if (direction === Direction.Left) {
+        v = hash(Buffer.concat([v, proof[i]]))
+      } else {
+        v = hash(Buffer.concat([proof[i], v]))
+      }
+    }
+
+    return v.equals(root)
   }
 
   get root(): Buffer {
@@ -42,7 +61,7 @@ export class SMT {
     let v = this._root
     const siblings: [Direction, Buffer][] = []
     for (let i = 0; i < DEPTH; i++) {
-      const direction = this._getPathDirection(key, i)
+      const direction = getPathDirection(key, i)
       const res = this._db.get(v)
       if (!res) throw new Error('Value not found in db')
       if (direction === Direction.Left) {
@@ -55,7 +74,7 @@ export class SMT {
     }
 
     if (value) {
-      v = sha256(value)
+      v = hash(value)
       this._db.set(v, value)
     } else {
       v = EMPTY_VALUE
@@ -65,10 +84,10 @@ export class SMT {
       const [direction, sibling] = siblings.pop()!
       let h
       if (direction === Direction.Left) {
-        h = sha256(Buffer.concat([v, sibling]))
+        h = hash(Buffer.concat([v, sibling]))
         this._db.set(h, Buffer.concat([v, sibling]))
       } else {
-        h = sha256(Buffer.concat([sibling, v]))
+        h = hash(Buffer.concat([sibling, v]))
         this._db.set(h, Buffer.concat([sibling, v]))
       }
       v = h
@@ -82,7 +101,7 @@ export class SMT {
 
     let v = this._root
     for (let i = 0; i < DEPTH; i++) {
-      const direction = this._getPathDirection(key, i)
+      const direction = getPathDirection(key, i)
       const res = this._db.get(v)
       if (!res) throw new Error('Value not found in db')
       if (direction === Direction.Left) {
@@ -95,9 +114,27 @@ export class SMT {
     return v.equals(EMPTY_VALUE) ? undefined : this._db.get(v)
   }
 
-  _getPathDirection(path: Buffer, i: number): Direction {
-    const byte = path[Math.floor(i / 8)]
-    const bit = byte & (2 ** (7 - (i % 8)))
-    return bit === 0 ? Direction.Left : Direction.Right
+  prove(key: Buffer): Buffer[] {
+    let v = this._root
+    const siblings = []
+    for (let i = 0; i < DEPTH; i++) {
+      const direction = getPathDirection(key, i)
+      const res = this._db.get(v)
+      if (!res) throw new Error('Value not found in db')
+      if (direction === Direction.Left) {
+        v = res.slice(0, 32)
+        siblings.push(res.slice(32, 64))
+      } else {
+        v = res.slice(32, 64)
+        siblings.push(res.slice(0, 32))
+      }
+    }
+    return siblings
   }
+}
+
+function getPathDirection(path: Buffer, i: number): Direction {
+  const byte = path[Math.floor(i / 8)]
+  const bit = byte & (2 ** (7 - (i % 8)))
+  return bit === 0 ? Direction.Left : Direction.Right
 }
