@@ -126,10 +126,15 @@ export class SMT {
     return siblings
   }
 
-  verifyProof(proof: Proof, root: Buffer, key: Buffer, value: Buffer): boolean {
+  verifyProof(proof: Proof, root: Buffer, key: Buffer, value?: Buffer): boolean {
     assert(proof.length === DEPTH, 'Incorrect proof length')
 
-    let v = this.hash(value)
+    let v
+    if (value) {
+      v = this.hash(value)
+    } else {
+      v = EMPTY_VALUE
+    }
     for (let i = DEPTH - 1; i >= 0; i--) {
       const direction = getPathDirection(key, i)
       if (direction === Direction.Left) {
@@ -142,7 +147,7 @@ export class SMT {
     return v.equals(root)
   }
 
-  verifyCompactProof(cproof: CompactProof, root: Buffer, key: Buffer, value: Buffer): boolean {
+  verifyCompactProof(cproof: CompactProof, root: Buffer, key: Buffer, value?: Buffer): boolean {
     const proof = this.decompressProof(cproof)
     return this.verifyProof(proof, root, key, value)
   }
@@ -162,11 +167,12 @@ export class SMT {
 
   decompressProof(cproof: CompactProof): Proof {
     const proof = []
+    const proofNodes = cproof.proof.reverse()
     for (let i = 0; i < DEPTH; i++) {
       if (cproof.bitmask[Math.floor(i / 8)] & (1 << (7 - (i % 8)))) {
         proof.push(this._defaultValues[i + 1])
       } else {
-        const v = cproof.proof.pop()
+        const v = proofNodes.pop()
         if (v === undefined) {
           throw new Error('Invalid compact proof')
         }
