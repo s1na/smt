@@ -1,5 +1,5 @@
 import * as tape from 'tape'
-import { SMT, EMPTY_VALUE } from '../src'
+import { SMT } from '../src'
 
 tape('SMT', (t: tape.Test) => {
   const tree = new SMT()
